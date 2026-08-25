@@ -1,0 +1,8 @@
+fastapi>=0.95.0
+uvicorn[standard]>=0.22.0
+sentence-transformers>=2.2.2
+playwright>=1.40.0
+requests>=2.0.0
+readability-lxml>=0.8.1
+tqdm>=4.0.0
+python-magic>=0.4.27

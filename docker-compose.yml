@@ -1,0 +1,11 @@
+version: '3.8'
+services:
+  local-search:
+    build: .
+    environment:
+      FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY:-}
+    ports:
+      - "9100:9100"
+    volumes:
+      - ./index:/app/index
+    restart: unless-stopped

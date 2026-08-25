@@ -1,0 +1,2 @@
+{"text": "Example DomainThis domain is for use in documentation examples without needing permission. Avoid use in operations.Learn more"}
+{"text": "# Python 3: List comprehensions &gt;&gt;&gt; fruits = ['Banana', 'Apple', 'Lime'] &gt;&gt;&gt; loud_fruits = [fruit.upper() for fruit in fruits] &gt;&gt;&gt; print(loud_fruits) ['BANANA', 'APPLE', 'LIME'] # List and the enumerate function &gt;&gt;&gt; list(enumerate(fruits)) [(0, 'Banana'), (1, 'Apple'), (2, 'Lime')]"}
