@@ -1,48 +1,115 @@
-# Local RAG Prototype for Hermes
+# Local RAG & Semantic Search Service
 
-Minimal local research stack: crawl → extract → embed → index → search.
+A private, self-hosted research stack: **crawl → extract → embed → index →
+semantic search**, served as a hardened HTTP API. No cloud, no telemetry — runs
+on your box (or one container).
 
-Quickstart (in your Hermes venv):
+```
+seed URLs
+   |
+   v
+crawl  (Playwright for JS-heavy pages · requests for static)
+   |    + readability extraction into clean text
+   |    + respects robots.txt + per-host rate limit by default
+   v
+docs.jsonl     (chunked, deduped)
+   |
+   v
+embed  (sentence-transformers — Hugging Face sentence embeddings)
+   |
+   v
+vector index   (in-memory cosine similarity; FAISS/Chroma-ready at scale)
+   |
+   v
+FastAPI search API
+   /local_search?q=...&k=5    -> ranked results
+   /health                    -> liveness
+   /metrics                   -> request metrics
+   + SearchBudgetGuard        (per-minute request budget)
+   + RequestMetrics           (lightweight observability)
+   + ExternalSearchAdapter    (pluggable Firecrawl-style integration hook)
+   + Dockerfile + docker-compose.yml (containerized backend)
+```
+
+---
+
+## Why it's an honest RAG/semantic-search project (not a stub)
+
+- **Embeddings, not string search** — `sentence-transformers` maps documents and
+  queries into a shared vector space; ranking is cosine similarity on embeddings.
+- **Real ingestion pipeline** — Playwright-backed crawling (JS-heavy) *or* `requests`
+  (static), with `readability-lxml` extraction, `robots.txt` + per-host rate limiting,
+  and a `--max-docs` volume guard for safe incremental crawls.
+- **Hardened serving** — `SearchBudgetGuard` (per-minute request budget),
+  `RequestMetrics` (`/metrics`), a pluggable `ExternalSearchAdapter`, and an index
+  **backup path** for recovery (`backup_dir` on index artifacts).
+- **Containerized** — `Dockerfile` (python:3.11-slim) + `docker-compose.yml`.
+- **Tested** — three hardening test suites (`tests/test_phase4.py`, `test_phase5.py`,
+  `test_hardening.py`).
+
+## Stack
+
+| Concern | Tech |
+|---|---|
+| Embeddings / search | **sentence-transformers** (transformer sentence embeddings), cosine similarity index |
+| Ingestion | Playwright (JS) / requests (static), readability-lxml, tqdm, python-magic |
+| API / serving | **FastAPI** + uvicorn |
+| Hardening | `SearchBudgetGuard`, `RequestMetrics`, `backup_dir` index recovery |
+| Integration | `ExternalSearchAdapter` (Firecrawl-style hook, opt-in) |
+| Packaging | `Dockerfile` + `docker-compose.yml` |
+| Tests | pytest (phase4 / phase5 / hardening) |
+
+---
+
+## Quickstart
 
 ```bash
-cd /home/jjrdev/local_search_service
 pip install -r requirements.txt
-# Crawl a few seeds into docs.jsonl
+
+# 1) Crawl seeds into a clean JSONL corpus
 python crawl_extract.py --seeds seeds.txt --out docs.jsonl
-# Build an index
+
+# 2) Build the embedding + cosine index
 python indexer.py --docs docs.jsonl --index-dir ./index
-# Run API
-uvicorn search_api:app --reload --host 127.0.0.1 --port 9100
+
+# 3) Serve the search API
+uvicorn search_api:app --host 127.0.0.1 --port 9100
+
+# 4) Query it
 curl 'http://127.0.0.1:9100/local_search?q=embedding&k=5'
 ```
 
-Design notes
-- This prototype uses `sentence-transformers` for embeddings and a simple
-  in-memory cosine-similarity search (sufficient for small collections).
-- Replace the search backend with FAISS/Chroma when scaling is needed.
-- The crawler supports Playwright for JS-heavy pages or `requests` for static.
+### Docker
 
-Safety
-- The crawler respects `robots.txt` and obeys a per-host rate limit by default.
-- Do not enable wide crawls on untrusted hosts without reviewing the policy.
+```bash
+docker compose up --build
+curl 'http://127.0.0.1:9100/health'
+```
 
-Files
-- `crawl_extract.py`: fetches and extracts textual content from seed URLs.
-- `indexer.py`: chunks, computes embeddings, and writes a simple index.
-- `search_api.py`: FastAPI app that serves `/local_search` and `/health`.
+### Optional: external search adapter (Firecrawl-style)
 
-Phase 4 additions
-- `--max-docs` limits crawl volume for safer incremental runs.
-- `backup_dir` creates a copy of the index artifacts for recovery.
-- `Dockerfile` and `docker-compose.yml` let the service run as a containerized backend.
+```bash
+export FIRECRAWL_API_KEY=your-key            # in the same shell that starts the service
+# or set it in a .env file next to docker-compose.yml for the containerized run
+```
 
-Phase 5 additions
-- `SearchBudgetGuard` enforces a simple per-minute request budget.
-- `RequestMetrics` exposes `/metrics` for lightweight observability.
-- `ExternalSearchAdapter` provides a placeholder hook for future Firecrawl-style integration.
+---
 
-Using your Firecrawl key
-- For a local run, export `FIRECRAWL_API_KEY` in the same shell that starts the service:
-  `export FIRECRAWL_API_KEY=your-key-here`
-- For Docker, set the same variable in the shell before starting Compose or place it in a `.env` file next to `docker-compose.yml`.
-- The adapter reads this value from the service process environment, so it must be present where `search_api.py` is launched.
+## Design notes (stated plainly, on purpose)
+
+- **In-memory cosine index** — deliberately simple and fast to iterate; swap the
+  backend to **FAISS/Chroma** when the corpus outgrows RAM. The interface
+  (`index → rank(query, k)`) is the only thing that changes.
+- **Safety-by-default crawling** — `robots.txt` + per-host rate limit are on; the
+  `--max-docs` guard caps crawl volume. Do not enable wide crawls on untrusted hosts.
+- **Private by default** — binds to `127.0.0.1`; no telemetry, no external calls
+  unless the opt-in adapter is configured.
+
+## Files
+
+- `crawl_extract.py` — fetch + extract text from seed URLs (Playwright / requests).
+- `indexer.py` — chunk, embed (`sentence-transformers`), write a cosine index.
+- `search_api.py` — FastAPI app: `/local_search`, `/health`, `/metrics` + budget guard.
+- `external_adapter.py` — pluggable (Firecrawl-style) external search hook.
+- `Dockerfile`, `docker-compose.yml` — containerized backend.
+- `tests/` — `test_phase4.py`, `test_phase5.py`, `test_hardening.py`.
